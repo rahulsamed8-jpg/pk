@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Harita Oyunu (v2.1) - TAKIM MODU (VDS)</title>
+
+    <script src="/socket.io/socket.io.js"></script>
+
+    <style>
+        :root {
+            --map-background-color: #f0f0f0;
+            --map-stroke-color: #ffffff;
+            --map-fill-color: #cccccc;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        #background-video {
+            position: fixed;
+            right: 0;
+            bottom: 0;
+            min-width: 100%;
+            min-height: 100%;
+            z-index: -100;
+            object-fit: cover;
+        }
+        #game-screen {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+        }
+        #map-container {
+            width: 75%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            background-color: var(--map-background-color);
+        }
+        #map-container svg {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        #map-container svg path {
+            fill: var(--map-fill-color);
+            stroke: var(--map-stroke-color);
+            stroke-width: 1;
+            transition: fill 0.3s ease;
+        }
+        #map-container svg path:hover {
+            opacity: 0.8;
+        }
+        #sidebar {
+            width: 25%;
+            padding: 15px;
+            background-color: rgba(0, 0, 0, 0.8);
+            box-shadow: -5px 0 15px rgba(0,0,0,0.5);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-section {
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        .sidebar-section h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #555;
+            padding-bottom: 10px;
+            color: #4CAF50;
+        }
+
+        /* --- Giriş Ekranı --- */
+        #login-screen {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: rgba(0,0,0,0.7);
+            /* v2.1: Giriş ekranı artık kaydırılabilir (video ayarları için) */
+            overflow-y: auto;
+            padding: 20px 0;
+        }
+        #login-form {
+            width: 500px; /* Video ayarları için genişletildi */
+            max-height: 90vh;
+            overflow-y: auto; /* Formun içi kaydırılabilir */
+        }
+
+        /* --- PK Modu Stilleri --- */
+        #pk-controls {
+            border: 1px solid #F58231;
+        }
+        #pk-controls h3 {
+            color: #F58231;
+        }
+        #pk-room-id, #pk-team-select { /* v2.1: Takım seçimi eklendi */
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #333;
+            color: #fff;
+        }
+        #pk-join-btn, #pk-leave-btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        #pk-join-btn {
+            background-color: #F58231;
+            color: #fff;
+        }
+        #pk-leave-btn {
+            background-color: #999;
+            color: #fff;
+            margin-top: 10px;
+            display: none;
+        }
+        #pk-chat-box {
+            height: 150px;
+            background-color: #000;
+            border: 1px solid #555;
+            border-radius: 4px;
+            overflow-y: auto;
+            padding: 10px;
+            margin-top: 10px;
+            display: none;
+        }
+        #pk-chat-box div {
+            margin-bottom: 5px;
+            word-wrap: break-word;
+        }
+
+        /* Sıralama Stilleri */
+        .ranking-menu {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            width: 300px;
+            max-height: 40%;
+            background-color: rgba(0, 0, 0, 0.75);
+            border: 1px solid #555;
+            border-radius: 8px;
+            color: #fff;
+            z-index: 100;
+        }
+        .ranking-menu h3 {
+            margin: 0;
+            padding: 10px 15px;
+            background-color: rgba(255, 255, 255, 0.1);
+            cursor: move;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        .ranking-list {
+            padding: 15px;
+            overflow-y: auto;
+            max-height: calc(40vh - 45px);
+        }
+        .ranking-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid #444;
+        }
+        .ranking-item:last-child {
+            border-bottom: none;
+        }
+        .ranking-pic {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        /* Bildirimler */
+        #gift-notifications {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .gift-notification {
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            animation: slideIn 0.5s ease-out forwards;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Diğer UI Elementleri */
+        #connection-status {
+            font-weight: bold;
+            padding: 5px 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        #connection-status.connected { background-color: #4CAF50; }
+        #connection-status.connecting { background-color: #f0ad4e; }
+        #connection-status.disconnected { background-color: #d9534f; }
+
+        input[type="color"], input[type="text"], input[type="file"], input[type="number"], select {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #333;
+            color: #fff;
+        }
+        input[type="checkbox"] {
+            margin-right: 10px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #ccc;
+        }
+        small {
+            font-size: 12px;
+            color: #888;
+        }
+
+        /* v2.1: Giriş Ekranı Video Ayarları için Yatay Hizalama */
+        .input-group-horizontal {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .input-group-horizontal label {
+            flex-basis: 30%;
+            margin-bottom: 0;
+        }
+        .input-group-horizontal input {
+            flex-basis: 70%;
+            margin-bottom: 0;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Arka Plan Videosu -->
+    <video autoplay muted loop id="background-video">
+    </video>
+
+    <!-- Giriş Ekranı (v2.1: Video Ayarları eklendi) -->
+    <div id="login-screen">
+        <form id="login-form" class="sidebar-section">
+            <h3>Harita Oyunu (v2.1) - TAKIM MODU VDS</h3>
+
+            <!-- Temel Giriş Bilgileri -->
+            <label for="player-name">Oyuncu Adı (Görünür Ad):</label>
+            <input type="text" id="player-name" placeholder="Oyuncu Adınız" required>
+
+            <label for="tiktok-username">TikTok Kullanıcı Adı (@ olmadan):</label>
+            <input type="text" id="tiktok-username" placeholder="canliyayin" required>
+
+            <label for="license-key">Lisans Anahtarı (VDS):</label>
+            <input type="text" id="license-key" placeholder="XXXX-XXXX-XXXX-XXXX" required>
+
+            <div>
+                <input type="checkbox" id="picture-mode-toggle">
+                <label for="picture-mode-toggle" style="display: inline;">Resim Modu (Tüm haritayı kaplar)</label>
+            </div>
+
+            <hr style="border-color: #444; margin: 20px 0;">
+
+            <!-- v2.1 GÜNCELLEMESİ: Video Ayarları GİRİŞ EKRANINA TAŞINDI -->
+            <div id="video-settings-login">
+                <h3>Video Ayarları (Oyundan Önce Yükle)</h3>
+
+                <label for="background-video-upload">Arka Plan Videosu Yükle:</label>
+                <input type="file" id="background-video-upload" accept="video/*">
+                <small id="bg-video-status">(Yüklendi)</small>
+
+                <label>Video Uyarı Boyutları (Genişlik x Yükseklik):</label>
+                <div class="input-group-horizontal">
+                    <input type="number" id="video-width" value="400" style="width: 45%;">
+                    <input type="number" id="video-height" value="300" style="width: 45%;">
+                </div>
+
+                <label for="gift-video-gül">Gül (1 İl) Videosu:</label>
+                <input type="file" id="gift-video-gül" accept="video/*">
+                <small id="gül-video-status">(Yüklendi)</small>
+
+                <label for="gift-video-kalp">Kalp (10 İl) Videosu:</label>
+                <input type="file" id="gift-video-kalp" accept="video/*">
+                <small id="kalp-video-status">(Yüklendi)</small>
+
+                <label for="gift-video-donat">Donat (36 İl) Videosu:</label>
+                <input type="file" id="gift-video-donat" accept="video/*">
+                <small id="donat-video-status">(Yüklendi)</small>
+
+                <label for="gift-video-cay">Çay (81 İl) Videosu:</label>
+                <input type="file" id="gift-video-cay" accept="video/*">
+                <small id="cay-video-status">(Yüklendi)</small>
+
+                <label for="gift-video-parfüm">Parfüm (24 İl) Videosu:</label>
+                <input type="file" id="gift-video-parfüm" accept="video/*">
+                <small id="parfüm-video-status">(Yüklendi)</small>
+
+                <label for="gift-video-finger-heart">Finger Heart (5 İl) Videosu:</label>
+                <input type="file" id="gift-video-finger-heart" accept="video/*">
+                <small id="finger-heart-video-status">(Yüklendi)</small>
+            </div>
+            <!-- v2.1 GÜNCELLEMESİ SONU -->
+
+            <button type="submit" id="login-btn" style="width: 100%; padding: 12px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 20px;">
+                TEK KİŞİLİK OYUNA BAŞLA
+            </button>
+            <div id="login-status" style="margin-top: 15px; text-align: center;"></div>
+        </form>
+    </div>
+
+    <!-- Oyun Ekranı -->
+    <div id="game-screen" style="display: none;">
+
+        <!-- Harita Alanı -->
+        <div id="map-container">
+        </div>
+
+        <!-- Yan Panel (Sidebar) -->
+        <div id="sidebar">
+
+            <!-- v2.1: PK Modu (Takım Seçimi eklendi) -->
+            <div id="pk-controls" class="sidebar-section">
+                <h3>PK Modu (VDS Sunucu)</h3>
+
+                <label for="pk-room-id">Oda Adı:</label>
+                <input type="text" id="pk-room-id" placeholder="pk1">
+
+                <!-- YENİ (v2.1) - Takım Seçimi -->
+                <label for="pk-team-select">Takım Seç:</label>
+                <select id="pk-team-select">
+                    <option value="kirmizi" style="color:#E6194B; font-weight: bold;">Kırmızı Takım</option>
+                    <option value="mavi" style="color:#4363D8; font-weight: bold;">Mavi Takım</option>
+                    <option value="yesil" style="color:#3CB44B; font-weight: bold;">Yeşil Takım</option>
+                    <option value="sari" style="color:#FFE119; font-weight: bold;">Sarı Takım</option>
+                </select>
+                <!-- YENİ (v2.1) SONU -->
+
+                <button id="pk-join-btn">PK Moduna Katıl</button>
+                <button id="pk-leave-btn">PK Modundan Ayrıl (Tek Kişiliğe Dön)</button>
+                <div id="pk-chat-box">
+                </div>
+            </div>
+
+            <!-- Tek Kişilik Oyun Bilgileri -->
+            <div id="single-player-info" class="sidebar-section">
+                <h3>Tek Kişilik Oyun (VDS)</h3>
+                <h4 id="display-player-name" contenteditable="true" title="Düzenlemek için tıklayın">Oyuncu Adı</h4>
+                <div id="connection-status" class="connecting">Bağlanıyor...</div>
+                <div id="map-king-info" style="margin-top: 10px; font-weight: bold; text-align: center;"></div>
+            </div>
+
+            <!-- Ayarlar (Harita) -->
+            <div class="sidebar-section">
+                <h3>Harita Ayarları</h3>
+                <label for="bg-color">Harita Arka Plan Rengi:</label>
+                <input type="color" id="bg-color" value="#f0f0f0">
+                <label for="stroke-color">İl Sınır Rengi:</label>
+                <input type="color" id="stroke-color" value="#ffffff">
+                <label for="fill-color">Boş İl Rengi:</label>
+                <input type="color" id="fill-color" value="#cccccc">
+                <label for="text-color">İl Sahibi Yazı Rengi:</label>
+                <input type="color" id="text-color" value="#000000">
+                <label for="text-size">İl Sahibi Yazı Boyutu:</label>
+                <input type="number" id="text-size" value="10" min="4" max="30">
+            </div>
+
+            <!-- v2.1 GÜNCELLEMESİ: Video Ayarları BURADAN TAŞINDI -->
+
+        </div> <!-- /sidebar -->
+    </div> <!-- /game-screen -->
+
+    <!-- Sıralamalar -->
+    <div class="ranking-menu warrior-ranking-menu" style="top: 10px; left: 10px;">
+        <h3>Savaşçı Sıralaması (Bu Harita)</h3>
+        <div class="ranking-list">
+        </div>
+    </div>
+    <div class="ranking-menu kingdom-ranking-menu" style="top: 10px; left: 320px;">
+        <h3>Krallık Sıralaması (Global - VDS/SQLite)</h3>
+        <div class="ranking-list">
+        </div>
+    </div>
+
+    <!-- Hediye Bildirim Alanı -->
+    <div id="gift-notifications"></div>
+
+    <!-- Video Uyarı Oynatıcısı -->
+    <div id="video-alert-box" class="ranking-menu" style="display: none; top: 20%; left: 30%; padding: 0; width: 400px; height: 335px;">
+        <h3 class="video-alert-drag-handle" style="margin: 0; padding: 10px;">Hediye Uyarısı! (Sürükle)</h3>
+        <video id="video-alert-player" style="width: 100%; height: auto; background: #000;" controls autoplay>
+        </video>
+    </div>
+
+    <script src="client.js"></script>
+
+</body>
+</html>
